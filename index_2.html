@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>デジタル会員証</title>
+
+<!-- ============================================================
+  設定はここだけ書き換えれば動きます
+============================================================= -->
+<script>
+  window.APP_CONFIG = {
+    LIFF_ID: 'YOUR_LIFF_ID_HERE',              // LINE Developers コンソールで発行されたLIFF ID
+    GAS_API_URL: 'YOUR_GAS_WEBAPP_URL_HERE',   // GASを「ウェブアプリ」としてデプロイした時のURL
+    BRAND_NAME: 'EDUMIRAR',                     // カード上部に表示するブランド名（差し替え可）
+    FAMILY_SLOT_LIMIT: 3                        // 家族連携できる人数（GAS側 FAMILY_SLOT_COLUMNS と合わせる）
+  };
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+
+<style>
+  :root{
+    --ink-950:#12060c;
+    --ink-900:#1a0a12;
+    --panel-a:#5c0e30;
+    --panel-b:#7c1140;
+    --panel-c:#380a1f;
+    --gold:#d9ad2e;
+    --gold-bright:#f2cd5c;
+    --gold-dim:#8a6a1e;
+    --paper:#f5ecd8;
+    --paper-dim:#d8c9a8;
+    --steel:#c9b48a;
+    --steel-bright:#efe3c6;
+    --danger:#e06a5a;
+    --ok:#8fbd7a;
+    --ribbon:#18120f;
+    --ribbon-border: rgba(217,173,46,.45);
+    --radius-card: 22px;
+  }
+
+  *{ box-sizing:border-box; }
+
+  html,body{
+    margin:0;
+    padding:0;
+    min-height:100vh;
+    background:
+      radial-gradient(1200px 700px at 50% -10%, #4a0e28 0%, transparent 60%),
+      var(--ink-950);
+    color:var(--paper);
+    font-family:'Noto Sans JP', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #app{
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:28px 18px;
+  }
+
+  /* ---------- 汎用: ローディング ---------- */
+  .loading{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:18px;
+    color:var(--paper-dim);
+    font-size:13px;
+    letter-spacing:.08em;
+  }
+  .loading .ring{
+    width:34px; height:34px;
+    border-radius:50%;
+    border:2px solid rgba(201,162,39,.25);
+    border-top-color:var(--gold);
+    animation:spin 0.9s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .error-box{
+    max-width:360px;
+    text-align:center;
+    color:var(--paper-dim);
+    font-size:14px;
+    line-height:1.8;
+  }
+  .error-box strong{ color:var(--paper); display:block; margin-bottom:6px; font-size:15px; }
+
+  /* ---------- 会員証カード ---------- */
+  .card-wrap{
+    width:100%;
+    max-width:380px;
+  }
+
+  .brand-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    margin-bottom:16px;
+    color:var(--steel);
+    font-size:12px;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+  }
+  .brand-row::before, .brand-row::after{
+    content:'';
+    height:1px;
+    width:28px;
+    background:linear-gradient(90deg, transparent, var(--gold-dim));
+  }
+  .brand-row::after{ transform:scaleX(-1); }
+
+  .card{
+    position:relative;
+    aspect-ratio: 1.586 / 1;
+    border-radius:var(--radius-card);
+    background:
+      linear-gradient(135deg, var(--panel-a) 0%, var(--panel-b) 55%, var(--panel-c) 100%);
+    box-shadow:
+      0 24px 48px -18px rgba(0,0,0,.65),
+      0 0 0 1px rgba(201,162,39,.18) inset;
+    overflow:hidden;
+    padding:20px 22px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    -webkit-touch-callout:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+
+  /* 背面の細かい罫線パターン(証書らしさ) */
+  .card::before{
+    content:'';
+    position:absolute; inset:0;
+    background-image:
+      repeating-linear-gradient(115deg, rgba(255,255,255,.025) 0 1px, transparent 1px 26px);
+    pointer-events:none;
+  }
+
+  /* ホログラム・スイープ(スクリーンショット抑止の実体) */
+  .holo{
+    position:absolute;
+    top:-40%; left:-60%;
+    width:70%; height:180%;
+    background:linear-gradient(
+      75deg,
+      transparent 0%,
+      rgba(232,197,101,0) 38%,
+      rgba(232,197,101,.35) 47%,
+      rgba(255,255,255,.55) 50%,
+      rgba(232,197,101,.35) 53%,
+      rgba(232,197,101,0) 62%,
+      transparent 100%
+    );
+    mix-blend-mode:screen;
+    transform:rotate(8deg);
+    animation:holoSweep 3.6s ease-in-out infinite;
+    pointer-events:none;
+  }
+  @keyframes holoSweep{
+    0%   { left:-70%; }
+    45%  { left:110%; }
+    100% { left:110%; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    /* 完全停止は複製防止の目的に反するため、速度のみ緩やかに */
+    .holo{ animation-duration:7.5s; }
+  }
+
+  .card-top{ position:relative; z-index:1; display:flex; align-items:flex-start; justify-content:space-between; }
+  .rank-pill{
+    font-family:'JetBrains Mono', monospace;
+    font-size:10.5px;
+    letter-spacing:.12em;
+    color:var(--ink-950);
+    background:linear-gradient(135deg, var(--gold-bright), var(--gold));
+    padding:4px 10px;
+    border-radius:100px;
+    font-weight:700;
+  }
+  .member-no{
+    font-family:'JetBrains Mono', monospace;
+    font-size:11px;
+    color:var(--steel);
+    letter-spacing:.06em;
+  }
+
+  .card-mid{ position:relative; z-index:1; }
+  .card-mid .label{
+    font-size:10px;
+    letter-spacing:.16em;
+    color:var(--steel);
+    text-transform:uppercase;
+    margin-bottom:4px;
+  }
+  .card-mid .name{
+    font-family:'Shippori Mincho', serif;
+    font-size:26px;
+    font-weight:700;
+    color:var(--paper);
+    line-height:1.3;
+  }
+
+  .family-tag{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    margin-top:8px;
+    font-size:11.5px;
+    color:var(--gold-bright);
+    background:var(--ribbon);
+    border:1px solid var(--ribbon-border);
+    padding:4px 10px;
+    border-radius:100px;
+    letter-spacing:.03em;
+  }
+  .family-tag .dot{
+    width:6px; height:6px; border-radius:50%;
+    background:var(--gold-bright);
+  }
+
+  .card-bottom{
+    position:relative; z-index:1;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    font-family:'JetBrains Mono', monospace;
+  }
+  .expiry-block .label{ font-size:9.5px; letter-spacing:.14em; color:var(--steel); text-transform:uppercase; margin-bottom:3px; }
+  .expiry-block .value{ font-size:13px; color:var(--paper-dim); }
+
+  .live-clock{
+    font-size:12px;
+    color:var(--gold-bright);
+    letter-spacing:.02em;
+    text-align:right;
+    opacity:.9;
+  }
+
+  .card-note{
+    margin-top:14px;
+    text-align:center;
+    font-size:11.5px;
+    color:var(--steel);
+    line-height:1.7;
+  }
+
+  /* ---------- 家族連携フォーム ---------- */
+  .link-form{
+    width:100%;
+    max-width:380px;
+    background:linear-gradient(135deg, var(--panel-a), var(--panel-c));
+    border:1px solid rgba(201,162,39,.2);
+    border-radius:18px;
+    padding:26px 24px 24px;
+  }
+  .link-form h1{
+    font-family:'Shippori Mincho', serif;
+    font-size:19px;
+    margin:0 0 6px;
+    color:var(--paper);
+  }
+  .link-form p.desc{
+    font-size:12.5px;
+    color:var(--paper-dim);
+    line-height:1.8;
+    margin:0 0 20px;
+  }
+  .field{ margin-bottom:14px; }
+  .field label{
+    display:block;
+    font-size:11px;
+    letter-spacing:.08em;
+    color:var(--steel);
+    margin-bottom:6px;
+  }
+  .field input{
+    width:100%;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.14);
+    border-radius:10px;
+    padding:12px 13px;
+    font-size:15px;
+    color:var(--paper);
+    font-family:'JetBrains Mono', monospace;
+    letter-spacing:.04em;
+    outline:none;
+  }
+  .field input:focus{
+    border-color:var(--gold);
+    box-shadow:0 0 0 3px rgba(201,162,39,.15);
+  }
+  .field input::placeholder{ color:#7a6058; font-family:'Noto Sans JP', sans-serif; }
+
+  .submit-btn{
+    width:100%;
+    margin-top:8px;
+    padding:13px;
+    border:none;
+    border-radius:10px;
+    background:linear-gradient(135deg, var(--gold-bright), var(--gold));
+    color:var(--ink-950);
+    font-weight:700;
+    font-size:14.5px;
+    letter-spacing:.04em;
+    cursor:pointer;
+  }
+  .submit-btn:disabled{ opacity:.5; cursor:default; }
+  .submit-btn:active:not(:disabled){ transform:translateY(1px); }
+
+  .msg{
+    margin-top:14px;
+    font-size:12.5px;
+    line-height:1.7;
+    text-align:center;
+    display:none;
+  }
+  .msg.show{ display:block; }
+  .msg.error{ color:var(--danger); }
+  .msg.ok{ color:var(--ok); }
+
+  .out-of-line{
+    max-width:340px;
+    text-align:center;
+    color:var(--paper-dim);
+    font-size:14px;
+    line-height:1.9;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="loading" id="view-loading">
+    <div class="ring"></div>
+    <div>認証中です…</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var CFG = window.APP_CONFIG;
+  var appEl = document.getElementById('app');
+
+  function render(html){ appEl.innerHTML = html; }
+
+  function esc(str){
+    return String(str == null ? '' : str).replace(/[&<>"']/g, function(c){
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+
+  // ---------------------------------------------------------
+  // 起動シーケンス
+  // ---------------------------------------------------------
+  async function boot(){
+    try{
+      await liff.init({ liffId: CFG.LIFF_ID });
+    }catch(err){
+      showFatalError('会員証の初期化に失敗しました。時間をおいて再度お試しください。');
+      return;
+    }
+
+    // 防御的チェック: LINEアプリ内以外からのアクセスは案内のみ表示する。
+    // (本来の入口制御は LINE Developers コンソール側の LIFF エンドポイント設定で行う)
+    if (!liff.isInClient()){
+      render(
+        '<div class="out-of-line">' +
+        '本会員証はLINEアプリ内でのみご利用いただけます。<br>' +
+        'LINEのトーク画面またはリッチメニューから開き直してください。' +
+        '</div>'
+      );
+      return;
+    }
+
+    if (!liff.isLoggedIn()){
+      liff.login();
+      return;
+    }
+
+    try{
+      var profile = await liff.getProfile();
+      var userId = profile.userId;
+      var result = await callApi({ action: 'verify', userId: userId });
+      route(result, userId);
+    }catch(err){
+      showFatalError('会員情報の確認に失敗しました。通信環境をご確認のうえ再度お試しください。');
+    }
+  }
+
+  function showFatalError(message){
+    render(
+      '<div class="error-box"><strong>エラー</strong>' + esc(message) + '</div>'
+    );
+  }
+
+  // ---------------------------------------------------------
+  // API通信
+  // 注意: preflight(OPTIONS)を発生させないよう Content-Type は
+  // text/plain とし、GAS側で e.postData.contents から JSON.parse する。
+  // ---------------------------------------------------------
+  function callApi(payload){
+    return fetch(CFG.GAS_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    }).then(function(res){ return res.json(); });
+  }
+
+  // ---------------------------------------------------------
+  // 画面振り分け
+  // ---------------------------------------------------------
+  function route(result, userId){
+    if (result.status === 'member'){
+      renderCard(result);
+    } else if (result.status === 'not_registered'){
+      renderLinkForm(userId);
+    } else {
+      showFatalError(result.message || '会員情報を確認できませんでした。');
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 会員証カード
+  // ---------------------------------------------------------
+  function renderCard(data){
+    var isFamily = data.role === 'family';
+    var displayName = isFamily ? (data.repName + ' 様のご家族') : data.name;
+
+    render(
+      '<div class="card-wrap">' +
+        '<div class="brand-row">' + esc(CFG.BRAND_NAME) + '</div>' +
+        '<div class="card" id="member-card">' +
+          '<div class="holo"></div>' +
+          '<div class="card-top">' +
+            '<span class="rank-pill">' + esc(data.rank || '') + '</span>' +
+            '<span class="member-no">No. ' + esc(data.memberNo || '') + '</span>' +
+          '</div>' +
+          '<div class="card-mid">' +
+            '<div class="label">MEMBER</div>' +
+            '<div class="name">' + esc(displayName) + '</div>' +
+            (isFamily
+              ? '<div class="family-tag"><span class="dot"></span>家族会員（' + esc(data.repName) + '様のご家族）</div>'
+              : ''
+            ) +
+          '</div>' +
+          '<div class="card-bottom">' +
+            '<div class="expiry-block">' +
+              '<div class="label">Valid Until</div>' +
+              '<div class="value">' + esc(data.expiry || '-') + '</div>' +
+            '</div>' +
+            '<div class="live-clock" id="live-clock">--</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card-note">この会員証は本人／連携済みご家族専用です。<br>第三者への貸与・共有はご遠慮ください。</div>' +
+      '</div>'
+    );
+
+    startClock();
+  }
+
+  function startClock(){
+    var el = document.getElementById('live-clock');
+    if (!el) return;
+    function tick(){
+      if (!document.body.contains(el)) return; // 画面遷移後は自動停止
+      var now = new Date();
+      var pad = function(n, l){ return String(n).padStart(l || 2, '0'); };
+      el.textContent =
+        now.getFullYear() + '/' + pad(now.getMonth()+1) + '/' + pad(now.getDate()) + ' ' +
+        pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds()) +
+        '.' + pad(now.getMilliseconds(), 3);
+      requestAnimationFrame(tick);
+    }
+    tick();
+  }
+
+  // ---------------------------------------------------------
+  // 家族連携フォーム
+  // ---------------------------------------------------------
+  function renderLinkForm(userId){
+    render(
+      '<div class="link-form">' +
+        '<h1>家族連携のお手続き</h1>' +
+        '<p class="desc">まだ会員登録が確認できませんでした。<br>' +
+        'ご家族の代表者様の会員番号と家族パスコードを入力してください。</p>' +
+        '<div class="field">' +
+          '<label>代表者の会員番号</label>' +
+          '<input type="text" id="input-memberno" inputmode="numeric" placeholder="例）00123">' +
+        '</div>' +
+        '<div class="field">' +
+          '<label>家族パスコード</label>' +
+          '<input type="text" id="input-passcode" inputmode="numeric" maxlength="6" placeholder="4〜6桁の数字">' +
+        '</div>' +
+        '<button class="submit-btn" id="link-submit">連携する</button>' +
+        '<div class="msg" id="link-msg"></div>' +
+      '</div>'
+    );
+
+    document.getElementById('link-submit').addEventListener('click', function(){
+      submitLink(userId);
+    });
+  }
+
+  async function submitLink(userId){
+    var btn = document.getElementById('link-submit');
+    var msgEl = document.getElementById('link-msg');
+    var memberNo = document.getElementById('input-memberno').value.trim();
+    var passcode = document.getElementById('input-passcode').value.trim();
+
+    msgEl.className = 'msg';
+    msgEl.textContent = '';
+
+    if (!memberNo || !passcode){
+      msgEl.className = 'msg show error';
+      msgEl.textContent = '会員番号とパスコードの両方を入力してください。';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '確認中…';
+
+    try{
+      var result = await callApi({
+        action: 'link',
+        userId: userId,
+        memberNo: memberNo,
+        passcode: passcode
+      });
+
+      if (result.status === 'success'){
+        msgEl.className = 'msg show ok';
+        msgEl.textContent = '連携が完了しました。会員証を表示します…';
+        setTimeout(function(){
+          callApi({ action: 'verify', userId: userId }).then(function(r){ route(r, userId); });
+        }, 900);
+      } else {
+        msgEl.className = 'msg show error';
+        msgEl.textContent = result.message || '連携に失敗しました。入力内容をご確認ください。';
+        btn.disabled = false;
+        btn.textContent = '連携する';
+      }
+    }catch(err){
+      msgEl.className = 'msg show error';
+      msgEl.textContent = '通信エラーが発生しました。時間をおいて再度お試しください。';
+      btn.disabled = false;
+      btn.textContent = '連携する';
+    }
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
